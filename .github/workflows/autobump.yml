@@ -7,8 +7,9 @@ on:
     paths:
       - .github/workflows/autobump.yml
   schedule:
-    # Hourly. A skipped run is picked up by the next one.
-    - cron: 0 * * * *
+    # Hourly, off the top of the hour when GitHub drops scheduled runs more
+    # often. A skipped run is picked up by the next one.
+    - cron: 17 * * * *
   workflow_dispatch:
     inputs:
       formulae:
@@ -72,13 +73,16 @@ jobs:
           fi
 
       # Merge bump pull requests automatically once the required checks pass.
+      # The author is filtered with jq, because `--author` makes `gh pr list`
+      # use the search API, which can miss pull requests opened moments ago.
       - name: Enable auto-merge
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         run: |
-          gh pr list --repo "$GITHUB_REPOSITORY" --author "app/$APP_SLUG" --state open \
-            --json number,autoMergeRequest --jq '.[] | select(.autoMergeRequest == null) | .number' |
+          gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+            --json number,author,autoMergeRequest \
+            --jq '.[] | select(.author.login == "app/\(env.APP_SLUG)" and .autoMergeRequest == null) | .number' |
             while read -r number
             do
               gh pr merge "$number" --repo "$GITHUB_REPOSITORY" --auto --squash
