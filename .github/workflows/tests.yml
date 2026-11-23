@@ -89,10 +89,8 @@ jobs:
           CASK: ${{ matrix.tap }}/${{ matrix.cask.token }}
         run: brew style --cask "$CASK"
 
-      # `--signing` checks that macOS Gatekeeper accepts the downloaded binaries,
-      # i.e. that they are signed and notarized. Homebrew only runs it by default
-      # for official taps. `--new` is dropped because its notability checks are
-      # meant for homebrew/cask submissions, not a personal tap.
+      # `--new` is dropped because its notability checks are meant for
+      # homebrew/cask submissions, not a personal tap.
       - name: Run brew audit --cask ${{ matrix.cask.token }}
         if: ${{ always() && steps.fetch.outcome == 'success' && !matrix.skip_audit }}
         env:
@@ -100,10 +98,6 @@ jobs:
           AUDIT_ARGS: ${{ join(matrix.audit_args, ' ') }}
         run: |
           read -ra args <<< "${AUDIT_ARGS//--new/}"
-          if [[ "$RUNNER_OS" == macOS ]]
-          then
-            args+=(--signing)
-          fi
           brew audit --cask --strict "${args[@]}" "$CASK"
         timeout-minutes: 30
 
@@ -128,6 +122,25 @@ jobs:
           !matrix.skip_install }}
         run: brew cask-ci install "$TAP_CASK_PATH"
         timeout-minutes: 30
+
+      # Casks are quarantined, so Gatekeeper blocks binaries that are not
+      # notarized. `brew audit` only checks this for official taps, so run the
+      # same check as its signing audit on every installed Mach-O file.
+      - name: Check notarization of ${{ matrix.cask.token }}
+        if: ${{ always() && steps.install.outcome == 'success' }}
+        env:
+          TOKEN: ${{ matrix.cask.token }}
+        run: |
+          checked=0
+          while IFS= read -r -d '' file
+          do
+            if file --brief "$file" | grep -q Mach-O
+            then
+              codesign --verify --strict -R=notarized --check-notarization --verbose=2 "$file"
+              checked=$((checked + 1))
+            fi
+          done < <(find "$(brew --caskroom)/$TOKEN" -type f -print0)
+          test "$checked" -gt 0
 
       - name: Run brew uninstall --cask ${{ matrix.cask.token }}
         if: ${{ always() && steps.install.outcome == 'success' }}
