@@ -1,9 +1,9 @@
 cask "mxm" do
   arch arm: "aarch64", intel: "x86_64"
 
-  version "0.6.1"
-  sha256 arm:   "4b31fcee70623d3d2067fa70bb78eb34fb46578c53ae8817c720ca88ab16c4d2",
-         intel: "75f8239c0c75e21d1ebd2e882bd93c341d2c87d1cd6ab19d4b540d5fd645cd9d"
+  version "0.6.2"
+  sha256 arm:   "801c73e6aa37d17347720dd08121d352713b5975f4f2b1c322ffeb3eb45284fb",
+         intel: "ff939d7d1a3028e59c013ed983a4045ff0705023b5c84f66bd1504b4429d2973"
 
   url "https://github.com/p-chan/mxm/releases/download/v#{version}/mxm-#{arch}-apple-darwin.tar.xz"
   name "mxm"
