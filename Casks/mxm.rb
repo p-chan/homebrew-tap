@@ -22,10 +22,13 @@ cask "mxm" do
   # Replace the daemon copy only for people who ran `mxm service install`.
   # `uninstall launchctl:` is left out on purpose: it also runs on upgrade,
   # and would remove the service that this update keeps.
-  postflight do
-    system_command "#{staged_path}/mxm-#{arch}-apple-darwin/mxm",
-                   args:         ["service", "update"],
-                   print_stdout: true
+  postflight_steps do
+    run "mxm-{{arch}}-apple-darwin/mxm",
+        base:           :staged_path,
+        args:           ["service", "update"],
+        print_stdout:   true,
+        writable_paths: ["Library/Application Support/mxm"],
+        writable_base:  :home
   end
 
   zap launchctl: "io.github.p-chan.mxm",
