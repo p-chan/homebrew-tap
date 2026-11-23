@@ -1,29 +1,34 @@
 # P-Chan Homebrew Tap
 
-## How do I install these formulae?
+## How do I install these packages?
 
-`brew install p-chan/tap/<formula>`
+Homebrew only loads formulae and casks from taps you trust, so trust this tap first:
 
-Or `brew tap p-chan/tap` and then `brew install <formula>`.
+```sh
+brew tap p-chan/tap
+brew trust --tap p-chan/tap
+```
+
+Then install a cask with `brew install --cask <cask>`, for example `brew install --cask mxm`.
 
 Or, in a `brew bundle` `Brewfile`:
 
 ```ruby
 tap "p-chan/tap"
-brew "<formula>"
+cask "<cask>"
 ```
 
-## How are formulae updated?
+## How are packages updated?
 
-The `brew bump` workflow checks for new versions every hour and opens a pull request for each outdated formula. The pull request merges automatically once the tests pass.
+The `brew bump` workflow checks for new versions every hour and opens a pull request for each outdated formula or cask. The pull request merges automatically once the tests pass.
 
 To check right away, for example just after a release, run the workflow manually:
 
 ```sh
-# All formulae
+# All formulae and casks
 gh workflow run autobump.yml -R p-chan/homebrew-tap
 
-# Specific formulae (space-separated)
+# Specific formulae or casks (space-separated)
 gh workflow run autobump.yml -R p-chan/homebrew-tap -f formulae=mxm
 ```
 
