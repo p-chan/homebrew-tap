@@ -1,4 +1,4 @@
-# P-chan Tap
+# P-Chan Homebrew Tap
 
 ## How do I install these formulae?
 
