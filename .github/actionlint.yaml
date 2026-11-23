@@ -1,0 +1,3 @@
+# Used by `brew style` instead of Homebrew's own actionlint config.
+config-variables:
+  - APP_CLIENT_ID
