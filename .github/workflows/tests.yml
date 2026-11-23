@@ -1,35 +1,60 @@
-# brew tap-new uses this file to generate a PR test workflow for the new tap
-name: brew test-bot
+# Based on Homebrew/homebrew-cask's CI: `brew generate-cask-ci-matrix` picks
+# the casks changed in the pull request, and each one is audited, installed
+# and uninstalled on the runners it supports.
+name: tests
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
 
 permissions: {}
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  HOMEBREW_DEVELOPER: 1
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_INSTALL_FROM_API: 1
 
 defaults:
   run:
     shell: bash -xeuo pipefail {0}
 
 jobs:
-  test-bot:
-    strategy:
-      matrix:
-        os: [ macos-26 ]
-        include:
-          - os: ubuntu-latest
-            container:
-              image: ghcr.io/homebrew/brew:main
-              options: --privileged
-    runs-on: ${{ matrix.os }}
-    container: ${{ fromJSON(toJSON(matrix.container)) }} # zizmor: ignore[unpinned-images]
+  generate-matrix:
+    runs-on: ubuntu-latest
     permissions:
-      actions: read
-      checks: read
       contents: read
       pull-requests: read
+    outputs:
+      matrix: ${{ steps.generate-matrix.outputs.matrix }}
+    steps:
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@ceec4e8419bb3c97ce96e9dda7738499ed5f869d # 2026.11.14.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate CI matrix
+        id: generate-matrix
+        env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PULL_REQUEST_URL: ${{ github.event.pull_request.url }}
+        run: brew generate-cask-ci-matrix --url "$PULL_REQUEST_URL"
+
+  test:
+    name: ${{ matrix.name }}
+    needs: generate-matrix
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }} # zizmor: ignore[unpinned-images]
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+    env:
+      HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Set up Homebrew
         id: set-up-homebrew
@@ -41,20 +66,85 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.set-up-homebrew.outputs.gems-path }}
-          key: ${{ matrix.os }}-rubygems-${{ steps.set-up-homebrew.outputs.gems-hash }}
-          restore-keys: ${{ matrix.os }}-rubygems-
+          key: ${{ matrix.runner }}-rubygems-${{ steps.set-up-homebrew.outputs.gems-hash }}
+          restore-keys: ${{ matrix.runner }}-rubygems-
 
-      - run: brew test-bot --only-cleanup-before
+      - name: Run brew style
+        if: ${{ !matrix.cask }}
+        env:
+          TAP: ${{ matrix.tap }}
+        run: brew style "$TAP"
 
-      - run: brew test-bot --only-setup
+      - name: Run brew fetch --cask
+        id: fetch
+        if: ${{ matrix.cask }}
+        env:
+          CASK: ${{ matrix.tap }}/${{ matrix.cask.token }}
+        run: brew fetch --cask --retry --force "$CASK"
+        timeout-minutes: 30
 
-      - run: brew test-bot --only-tap-syntax
-      - run: brew test-bot --only-formulae
-        if: github.event_name == 'pull_request'
+      - name: Run brew style ${{ matrix.cask.token }}
+        if: ${{ always() && steps.fetch.outcome == 'success' }}
+        env:
+          CASK: ${{ matrix.tap }}/${{ matrix.cask.token }}
+        run: brew style --cask "$CASK"
 
-      - name: Upload bottles as artifact
-        if: always() && github.event_name == 'pull_request'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: bottles_${{ matrix.os }}
-          path: '*.bottle.*'
+      # `--signing` checks that macOS Gatekeeper accepts the downloaded binaries,
+      # i.e. that they are signed and notarized. Homebrew only runs it by default
+      # for official taps. `--new` is dropped because its notability checks are
+      # meant for homebrew/cask submissions, not a personal tap.
+      - name: Run brew audit --cask ${{ matrix.cask.token }}
+        if: ${{ always() && steps.fetch.outcome == 'success' && !matrix.skip_audit }}
+        env:
+          CASK: ${{ matrix.tap }}/${{ matrix.cask.token }}
+          AUDIT_ARGS: ${{ join(matrix.audit_args, ' ') }}
+        run: |
+          read -ra args <<< "${AUDIT_ARGS//--new/}"
+          if [[ "$RUNNER_OS" == macOS ]]
+          then
+            args+=(--signing)
+          fi
+          brew audit --cask --strict "${args[@]}" "$CASK"
+        timeout-minutes: 30
+
+      # Homebrew no longer loads casks from arbitrary file paths, so `brew cask-ci`
+      # is given the cask's path inside the tapped repository.
+      - name: Gather cask information
+        id: info
+        if: ${{ always() && steps.fetch.outcome == 'success' }}
+        env:
+          CASK_PATH: ${{ matrix.cask.path }}
+          TAP: ${{ matrix.tap }}
+        run: |
+          tap_cask_path="$(brew --repository "$TAP")/${CASK_PATH#./}"
+          echo "TAP_CASK_PATH=$tap_cask_path" >> "$GITHUB_ENV"
+          brew cask-ci info "$tap_cask_path"
+
+      - name: Run brew cask-ci install ${{ matrix.cask.token }}
+        id: install
+        if: >-
+          ${{ always() && steps.info.outcome == 'success' &&
+          fromJSON(steps.info.outputs.macos_requirement_satisfied) &&
+          !matrix.skip_install }}
+        run: brew cask-ci install "$TAP_CASK_PATH"
+        timeout-minutes: 30
+
+      - name: Run brew uninstall --cask ${{ matrix.cask.token }}
+        if: ${{ always() && steps.install.outcome == 'success' }}
+        env:
+          CASK: ${{ matrix.tap }}/${{ matrix.cask.token }}
+        run: brew uninstall --cask "$CASK"
+        timeout-minutes: 30
+
+  # Job names in the matrix depend on the casks changed, so the branch ruleset
+  # requires this job instead.
+  conclusion:
+    needs: test
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Check test results
+        env:
+          RESULT: ${{ needs.test.result }}
+        run: test "$RESULT" = success
