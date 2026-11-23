@@ -10,6 +10,11 @@ on:
     # Hourly, off the top of the hour when GitHub drops scheduled runs more
     # often. A skipped run is picked up by the next one.
     - cron: 17 * * * *
+  # Sent by tool repositories after a release, so that the bump does not wait
+  # for the schedule, which GitHub may delay or skip.
+  repository_dispatch:
+    types:
+      - bump
   workflow_dispatch:
     inputs:
       formulae:
